@@ -108,7 +108,7 @@ fig = make_subplots(
     cols=1,
     shared_xaxes=True,
     vertical_spacing=0.03,
-    row_heights=[0.65, 0.35],
+    row_heights=[0.7, 0.3],
 )
 
 # Row 1: Candlestick (price)
@@ -127,22 +127,27 @@ fig.add_trace(
     col=1,
 )
 
-# Row 2: Buildup bars (OI change)
+# Row 2: ONLY buildup bars
 fig.add_trace(
     go.Bar(
         x=df.index,
         y=df["buildup_value"],
         marker_color=colors,
         name="Position Buildup",
+        width=0.5,          # narrower bars
     ),
     row=2,
     col=1,
 )
 
-# Layout tuning
-fig.update_yaxes(title_text="Price", row=1, col=1, showgrid=True,
-                 gridcolor="rgba(220,220,220,0.5)")
-fig.update_yaxes(title_text="OI Change (Buildup)", row=2, col=1,
+# Price panel
+fig.update_yaxes(title_text="Price", row=1, col=1,
+                 showgrid=True, gridcolor="rgba(220,220,220,0.5)")
+
+# Buildup panel: start at 0, pure volume-style
+fig.update_yaxes(title_text="OI Change (Buildup)",
+                 row=2, col=1,
+                 rangemode="tozero",
                  showgrid=False)
 
 fig.update_xaxes(title_text="Time", row=2, col=1)
@@ -159,11 +164,10 @@ fig.update_layout(
     height=800,
 )
 
-# Make volume-style clean bars
+# Make bars clean (no border)
 fig.update_traces(marker_line_width=0, row=2, col=1)
 
 st.plotly_chart(fig, use_container_width=True)
-
 st.caption(
     "Green bars = Long buildup (Price↑, OI↑). "
     "Red bars = Short buildup (Price↓, OI↑). Dummy data only – next step: Upstox live data."
