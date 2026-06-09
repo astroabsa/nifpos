@@ -1,75 +1,99 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
-
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
+from datetime import datetime, timedelta
+import requests
 
-# -----------------------
-# Streamlit page config
-# -----------------------
 st.set_page_config(
-    page_title="NIFTY FUT Buildup Demo",
+    page_title="NIFTY FUT Buildup (Upstox V2)",
     layout="wide",
 )
 
-st.title("NIFTY Futures - Price + Position Buildup (Dummy Data)")
+st.title("NIFTY Futures - Price + Position Buildup (Upstox V2)")
 
-# -----------------------
-# Sidebar – timeframe
-# -----------------------
-tf = st.sidebar.selectbox(
-    "Timeframe",
-    options=["1 min", "3 min", "5 min"],
-    index=0,
-)
+# ---------- Config ----------
+ACCESS_TOKEN = st.secrets["upstox"]["access_token"]  # .streamlit/secrets.toml
+BASE_URL = "https://api.upstox.com/v2"
 
-if tf == "1 min":
-    step_minutes = 1
-elif tf == "3 min":
-    step_minutes = 3
-else:
-    step_minutes = 5
+# TODO: is key ko apne instruments master se sahi NIFTY fut key se replace karo
+NIFTY_FUT_INSTRUMENT_KEY = "NSE_FO|NIFTY24JUNFUT"  # placeholder
 
-st.sidebar.write(f"Dummy candles every {step_minutes} minute(s).")
+# ---------- Helper: intraday candles ----------
+def fetch_intraday_candles_v2(
+    instrument_key: str,
+    interval: str = "1minute",
+    points: int = 50,
+) -> pd.DataFrame:
+    """
+    Upstox V2 intraday candle endpoint ka typical pattern:
+    GET /historical-candle/intraday?instrument_key=...&interval=1minute&to=...&from=...
+    Response: { data: { candles: [[ts, o, h, l, c, v], ...] } }
+    """
+    end_time = datetime.now()
+    start_time = end_time - timedelta(minutes=points)
 
-# -----------------------
-# 1. Generate dummy data
-# -----------------------
-np.random.seed(42)
-
-num_candles = 50
-start_time = datetime.now() - timedelta(minutes=num_candles * step_minutes)
-
-times = [start_time + timedelta(minutes=i * step_minutes)
-         for i in range(num_candles)]
-
-# Price path
-price = 22500 + np.cumsum(np.random.normal(0, 5, size=num_candles))
-high = price + np.random.uniform(5, 15, size=num_candles)
-low = price - np.random.uniform(5, 15, size=num_candles)
-open_ = price + np.random.normal(0, 3, size=num_candles)
-close = price
-
-# OI path
-oi = 100000 + np.cumsum(np.random.normal(0, 500, size=num_candles))
-oi = np.maximum(oi, 50000)
-
-df = pd.DataFrame(
-    {
-        "time": times,
-        "open": open_,
-        "high": high,
-        "low": low,
-        "close": close,
-        "oi": oi,
+    params = {
+        "instrument_key": instrument_key,
+        "interval": interval,
+        "to": end_time.strftime("%Y-%m-%d %H:%M"),
+        "from": start_time.strftime("%Y-%m-%d %H:%M"),
     }
-).set_index("time")
 
-# -----------------------
-# 2. Compute buildup
-# -----------------------
+    headers = {
+        "Authorization": f"Bearer {ACCESS_TOKEN}",
+        "Accept": "application/json",
+    }
+
+    url = f"{BASE_URL}/historical-candle/intraday"
+    r = requests.get(url, headers=headers, params=params, timeout=10)
+    r.raise_for_status()
+    js = r.json()
+
+    candles = js.get("data", {}).get("candles", [])
+    if not candles:
+        raise RuntimeError("No intraday candles returned from Upstox")
+
+    rows = []
+    for c in candles:
+        # [timestamp, open, high, low, close, volume, ...]
+        ts = datetime.fromisoformat(c[0])
+        o = float(c[1])
+        h = float(c[2])
+        l = float(c[3])
+        cl = float(c[4])
+        vol = float(c[5]) if len(c) > 5 else 0.0
+        # V2 candles me normally OI nahi hota, to NaN rakhenge
+        rows.append((ts, o, h, l, cl, vol))
+
+    df = pd.DataFrame(
+        rows,
+        columns=["time", "open", "high", "low", "close", "volume"],
+    ).set_index("time")
+
+    return df
+
+
+# ---------- Fetch from Upstox ----------
+with st.spinner("Fetching NIFTY FUT intraday candles from Upstox..."):
+    try:
+        df = fetch_intraday_candles_v2(
+            instrument_key=NIFTY_FUT_INSTRUMENT_KEY,
+            interval="1minute",
+            points=80,
+        )
+    except Exception as e:
+        st.error(f"Upstox API error: {e}")
+        st.stop()
+
+# --------- Synthetic OI (jab tak real OI source fix na karein) ----------
+# Abhi sirf visualization ke liye monotonic-ish OI generate kar rahe hain.
+np.random.seed(42)
+oi = 100000 + np.cumsum(np.random.normal(0, 500, size=len(df)))
+oi = np.maximum(oi, 50000)
+df["oi"] = oi
+
+# ---------- Buildup calculation ----------
 df["prev_close"] = df["close"].shift(1)
 df["prev_oi"] = df["oi"].shift(1)
 
@@ -94,40 +118,15 @@ df["buildup_value"] = np.where(
 colors = []
 for typ in df["buildup_type"]:
     if typ == "LONG":
-        colors.append("rgba(0, 200, 0, 0.9)")   # green
+        colors.append("rgba(0, 200, 0, 0.8)")
     elif typ == "SHORT":
-        colors.append("rgba(220, 0, 0, 0.9)")   # red
+        colors.append("rgba(200, 0, 0, 0.8)")
     else:
-        colors.append("rgba(0, 0, 0, 0.0)")     # invisible
+        colors.append("rgba(0, 0, 0, 0.0)")
 
-# ------- buildup values ko + / - banao  -------
-df["buildup_signed"] = 0.0
+# ---------- Plotly combined figure ----------
+fig = go.Figure()
 
-df.loc[df["buildup_type"] == "LONG", "buildup_signed"] = df["oi_change"].abs()
-df.loc[df["buildup_type"] == "SHORT", "buildup_signed"] = -df["oi_change"].abs()
-
-colors = []
-for val in df["buildup_signed"]:
-    if val > 0:
-        colors.append("rgba(0, 200, 0, 0.9)")   # LONG -> green
-    elif val < 0:
-        colors.append("rgba(220, 0, 0, 0.9)")   # SHORT -> red
-    else:
-        colors.append("rgba(0, 0, 0, 0.0)")     # NONE -> invisible
-
-# ------- subplots -------
-from plotly.subplots import make_subplots
-import plotly.graph_objects as go
-
-fig = make_subplots(
-    rows=2,
-    cols=1,
-    shared_xaxes=True,
-    vertical_spacing=0.03,
-    row_heights=[0.7, 0.3],
-)
-
-# Row 1: price candles
 fig.add_trace(
     go.Candlestick(
         x=df.index,
@@ -138,45 +137,50 @@ fig.add_trace(
         name="NIFTY FUT",
         increasing_line_color="#00cc96",
         decreasing_line_color="#ff4b4b",
-    ),
-    row=1,
-    col=1,
+    )
 )
 
-# Row 2: signed buildup histogram
 fig.add_trace(
     go.Bar(
         x=df.index,
-        y=df["buildup_signed"],
+        y=df["buildup_value"],
         marker_color=colors,
         name="Position Buildup",
-        width=0.6,
-    ),
-    row=2,
-    col=1,
+        yaxis="y2",
+    )
 )
-
-fig.update_yaxes(title_text="Price", row=1, col=1,
-                 showgrid=True, gridcolor="rgba(220,220,220,0.5)")
-
-fig.update_yaxes(title_text="OI Change (Buildup)",
-                 row=2, col=1,
-                 zeroline=True, zerolinecolor="black",
-                 showgrid=False)
-
-fig.update_xaxes(title_text="Time", row=2, col=1)
 
 fig.update_layout(
-    legend=dict(orientation="h", yanchor="bottom", y=1.02,
-                xanchor="right", x=1),
+    xaxis=dict(
+        title="Time",
+        rangeslider=dict(visible=False),
+    ),
+    yaxis=dict(
+        title="Price",
+        side="right",
+        showgrid=True,
+        gridcolor="rgba(200,200,200,0.3)",
+    ),
+    yaxis2=dict(
+        title="OI Change (Buildup)",
+        overlaying="y",
+        side="left",
+        showgrid=False,
+    ),
+    legend=dict(
+        orientation="h",
+        yanchor="bottom",
+        y=1.02,
+        xanchor="right",
+        x=1,
+    ),
     margin=dict(l=40, r=40, t=40, b=40),
-    height=800,
+    height=700,
 )
 
-fig.update_traces(marker_line_width=0, row=2, col=1)
-
 st.plotly_chart(fig, use_container_width=True)
+
 st.caption(
     "Green bars = Long buildup (Price↑, OI↑). "
-    "Red bars = Short buildup (Price↓, OI↑). Dummy data only – next step: Upstox live data."
+    "Red bars = Short buildup (Price↓, OI↑). Price from Upstox V2 intraday candles; OI currently synthetic."
 )
