@@ -6,15 +6,18 @@ from datetime import datetime, timedelta
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+# -----------------------
+# Streamlit page config
+# -----------------------
 st.set_page_config(
     page_title="NIFTY FUT Buildup Demo",
     layout="wide",
 )
 
-st.title("NIFTY Futures - Price + Position Buildup (Dummy Data Demo)")
+st.title("NIFTY Futures - Price + Position Buildup (Dummy Data)")
 
 # -----------------------
-# 0. Sidebar – timeframe
+# Sidebar – timeframe
 # -----------------------
 tf = st.sidebar.selectbox(
     "Timeframe",
@@ -91,11 +94,11 @@ df["buildup_value"] = np.where(
 colors = []
 for typ in df["buildup_type"]:
     if typ == "LONG":
-        colors.append("rgba(0, 200, 0, 0.8)")
+        colors.append("rgba(0, 200, 0, 0.9)")   # green
     elif typ == "SHORT":
-        colors.append("rgba(200, 0, 0, 0.8)")
+        colors.append("rgba(220, 0, 0, 0.9)")   # red
     else:
-        colors.append("rgba(0, 0, 0, 0.0)")
+        colors.append("rgba(0, 0, 0, 0.0)")     # invisible
 
 # -----------------------
 # 3. Plotly subplots: 2 rows
@@ -106,11 +109,9 @@ fig = make_subplots(
     shared_xaxes=True,
     vertical_spacing=0.03,
     row_heights=[0.65, 0.35],
-    specs=[[{"type": "xy"}],
-           [{"type": "xy"}]],
 )
 
-# Row 1: Candlestick
+# Row 1: Candlestick (price)
 fig.add_trace(
     go.Candlestick(
         x=df.index,
@@ -126,7 +127,7 @@ fig.add_trace(
     col=1,
 )
 
-# Row 2: Buildup bars
+# Row 2: Buildup bars (OI change)
 fig.add_trace(
     go.Bar(
         x=df.index,
@@ -138,10 +139,15 @@ fig.add_trace(
     col=1,
 )
 
+# Layout tuning
+fig.update_yaxes(title_text="Price", row=1, col=1, showgrid=True,
+                 gridcolor="rgba(220,220,220,0.5)")
+fig.update_yaxes(title_text="OI Change (Buildup)", row=2, col=1,
+                 showgrid=False)
+
+fig.update_xaxes(title_text="Time", row=2, col=1)
+
 fig.update_layout(
-    xaxis2=dict(title="Time"),
-    yaxis=dict(title="Price"),
-    yaxis2=dict(title="OI Change (Buildup)"),
     legend=dict(
         orientation="h",
         yanchor="bottom",
@@ -153,9 +159,12 @@ fig.update_layout(
     height=800,
 )
 
+# Make volume-style clean bars
+fig.update_traces(marker_line_width=0, row=2, col=1)
+
 st.plotly_chart(fig, use_container_width=True)
 
 st.caption(
     "Green bars = Long buildup (Price↑, OI↑). "
-    "Red bars = Short buildup (Price↓, OI↑). Dummy data only."
+    "Red bars = Short buildup (Price↓, OI↑). Dummy data only – next step: Upstox live data."
 )
