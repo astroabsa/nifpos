@@ -100,6 +100,25 @@ for typ in df["buildup_type"]:
     else:
         colors.append("rgba(0, 0, 0, 0.0)")     # invisible
 
+# ------- buildup values ko + / - banao  -------
+df["buildup_signed"] = 0.0
+
+df.loc[df["buildup_type"] == "LONG", "buildup_signed"] = df["oi_change"].abs()
+df.loc[df["buildup_type"] == "SHORT", "buildup_signed"] = -df["oi_change"].abs()
+
+colors = []
+for val in df["buildup_signed"]:
+    if val > 0:
+        colors.append("rgba(0, 200, 0, 0.9)")   # LONG -> green
+    elif val < 0:
+        colors.append("rgba(220, 0, 0, 0.9)")   # SHORT -> red
+    else:
+        colors.append("rgba(0, 0, 0, 0.0)")     # NONE -> invisible
+
+# ------- subplots -------
+from plotly.subplots import make_subplots
+import plotly.graph_objects as go
+
 fig = make_subplots(
     rows=2,
     cols=1,
@@ -108,7 +127,7 @@ fig = make_subplots(
     row_heights=[0.7, 0.3],
 )
 
-# Row 1: ONLY price candles
+# Row 1: price candles
 fig.add_trace(
     go.Candlestick(
         x=df.index,
@@ -124,14 +143,14 @@ fig.add_trace(
     col=1,
 )
 
-# Row 2: ONLY buildup bars
+# Row 2: signed buildup histogram
 fig.add_trace(
     go.Bar(
         x=df.index,
-        y=df["buildup_value"],
+        y=df["buildup_signed"],
         marker_color=colors,
         name="Position Buildup",
-        width=0.5,
+        width=0.6,
     ),
     row=2,
     col=1,
@@ -139,8 +158,12 @@ fig.add_trace(
 
 fig.update_yaxes(title_text="Price", row=1, col=1,
                  showgrid=True, gridcolor="rgba(220,220,220,0.5)")
-fig.update_yaxes(title_text="OI Change (Buildup)", row=2, col=1,
-                 rangemode="tozero", showgrid=False)
+
+fig.update_yaxes(title_text="OI Change (Buildup)",
+                 row=2, col=1,
+                 zeroline=True, zerolinecolor="black",
+                 showgrid=False)
+
 fig.update_xaxes(title_text="Time", row=2, col=1)
 
 fig.update_layout(
