@@ -100,18 +100,9 @@ for typ in df["buildup_type"]:
     else:
         colors.append("rgba(0, 0, 0, 0.0)")     # invisible
 
-# -----------------------
-# 3. Plotly subplots: 2 rows
-# -----------------------
-fig = make_subplots(
-    rows=2,
-    cols=1,
-    shared_xaxes=True,
-    vertical_spacing=0.03,
-    row_heights=[0.7, 0.3],
-)
+# 3. Plotly – sirf ek candlestick test
+fig = go.Figure()
 
-# Row 1: Candlestick (price)
 fig.add_trace(
     go.Candlestick(
         x=df.index,
@@ -122,50 +113,14 @@ fig.add_trace(
         name="NIFTY FUT",
         increasing_line_color="#00cc96",
         decreasing_line_color="#ff4b4b",
-    ),
-    row=1,
-    col=1,
+    )
 )
-
-# Row 2: ONLY buildup bars
-fig.add_trace(
-    go.Bar(
-        x=df.index,
-        y=df["buildup_value"],
-        marker_color=colors,
-        name="Position Buildup",
-        width=0.5,          # narrower bars
-    ),
-    row=2,
-    col=1,
-)
-
-# Price panel
-fig.update_yaxes(title_text="Price", row=1, col=1,
-                 showgrid=True, gridcolor="rgba(220,220,220,0.5)")
-
-# Buildup panel: start at 0, pure volume-style
-fig.update_yaxes(title_text="OI Change (Buildup)",
-                 row=2, col=1,
-                 rangemode="tozero",
-                 showgrid=False)
-
-fig.update_xaxes(title_text="Time", row=2, col=1)
 
 fig.update_layout(
-    legend=dict(
-        orientation="h",
-        yanchor="bottom",
-        y=1.02,
-        xanchor="right",
-        x=1,
-    ),
-    margin=dict(l=40, r=40, t=40, b=40),
-    height=800,
+    xaxis_title="Time",
+    yaxis_title="Price",
+    height=600,
 )
-
-# Make bars clean (no border)
-fig.update_traces(marker_line_width=0, row=2, col=1)
 
 st.plotly_chart(fig, use_container_width=True)
 st.caption(
