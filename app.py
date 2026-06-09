@@ -1,8 +1,10 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import plotly.graph_objects as go
 from datetime import datetime, timedelta
+
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 st.set_page_config(
     page_title="NIFTY FUT Buildup Demo",
@@ -12,14 +14,33 @@ st.set_page_config(
 st.title("NIFTY Futures - Price + Position Buildup (Dummy Data Demo)")
 
 # -----------------------
+# 0. Sidebar – timeframe
+# -----------------------
+tf = st.sidebar.selectbox(
+    "Timeframe",
+    options=["1 min", "3 min", "5 min"],
+    index=0,
+)
+
+if tf == "1 min":
+    step_minutes = 1
+elif tf == "3 min":
+    step_minutes = 3
+else:
+    step_minutes = 5
+
+st.sidebar.write(f"Dummy candles every {step_minutes} minute(s).")
+
+# -----------------------
 # 1. Generate dummy data
 # -----------------------
 np.random.seed(42)
 
 num_candles = 50
-start_time = datetime.now() - timedelta(minutes=num_candles)
+start_time = datetime.now() - timedelta(minutes=num_candles * step_minutes)
 
-times = [start_time + timedelta(minutes=i) for i in range(num_candles)]
+times = [start_time + timedelta(minutes=i * step_minutes)
+         for i in range(num_candles)]
 
 # Price path
 price = 22500 + np.cumsum(np.random.normal(0, 5, size=num_candles))
@@ -28,9 +49,9 @@ low = price - np.random.uniform(5, 15, size=num_candles)
 open_ = price + np.random.normal(0, 3, size=num_candles)
 close = price
 
-# OI path (monotonic-ish but noisy)
+# OI path
 oi = 100000 + np.cumsum(np.random.normal(0, 500, size=num_candles))
-oi = np.maximum(oi, 50000)  # avoid negative
+oi = np.maximum(oi, 50000)
 
 df = pd.DataFrame(
     {
@@ -41,9 +62,7 @@ df = pd.DataFrame(
         "close": close,
         "oi": oi,
     }
-)
-
-df.set_index("time", inplace=True)
+).set_index("time")
 
 # -----------------------
 # 2. Compute buildup
@@ -54,7 +73,6 @@ df["prev_oi"] = df["oi"].shift(1)
 df["price_change"] = df["close"] - df["prev_close"]
 df["oi_change"] = df["oi"] - df["prev_oi"]
 
-# Long / Short buildup flags
 conditions_long = (df["price_change"] > 0) & (df["oi_change"] > 0)
 conditions_short = (df["price_change"] < 0) & (df["oi_change"] > 0)
 
@@ -64,29 +82,35 @@ df["buildup_type"] = np.where(
     np.where(conditions_short, "SHORT", "NONE"),
 )
 
-# Bar height: only where buildup exists, else 0
 df["buildup_value"] = np.where(
     df["buildup_type"].isin(["LONG", "SHORT"]),
     df["oi_change"].abs(),
     0,
 )
 
-# Colors: green for LONG, red for SHORT, transparent for NONE
 colors = []
 for typ in df["buildup_type"]:
     if typ == "LONG":
-        colors.append("rgba(0, 200, 0, 0.8)")   # green
+        colors.append("rgba(0, 200, 0, 0.8)")
     elif typ == "SHORT":
-        colors.append("rgba(200, 0, 0, 0.8)")   # red
+        colors.append("rgba(200, 0, 0, 0.8)")
     else:
-        colors.append("rgba(0, 0, 0, 0.0)")     # invisible
+        colors.append("rgba(0, 0, 0, 0.0)")
 
 # -----------------------
-# 3. Build Plotly figure
+# 3. Plotly subplots: 2 rows
 # -----------------------
-fig = go.Figure()
+fig = make_subplots(
+    rows=2,
+    cols=1,
+    shared_xaxes=True,
+    vertical_spacing=0.03,
+    row_heights=[0.65, 0.35],
+    specs=[[{"type": "xy"}],
+           [{"type": "xy"}]],
+)
 
-# Candlestick (row 1 conceptually)
+# Row 1: Candlestick
 fig.add_trace(
     go.Candlestick(
         x=df.index,
@@ -97,51 +121,41 @@ fig.add_trace(
         name="NIFTY FUT",
         increasing_line_color="#00cc96",
         decreasing_line_color="#ff4b4b",
-    )
+    ),
+    row=1,
+    col=1,
 )
 
-# Add a second y-axis for buildup bars
+# Row 2: Buildup bars
 fig.add_trace(
     go.Bar(
         x=df.index,
         y=df["buildup_value"],
         marker_color=colors,
         name="Position Buildup",
-        yaxis="y2",
-    )
+    ),
+    row=2,
+    col=1,
 )
 
 fig.update_layout(
-    xaxis=dict(
-        title="Time",
-        rangeslider=dict(visible=False),
-    ),
-    yaxis=dict(
-        title="Price",
-        side="right",
-        showgrid=True,
-        gridcolor="rgba(200,200,200,0.3)",
-    ),
-    yaxis2=dict(
-        title="OI Change (Buildup)",
-        overlaying="y",
-        side="left",
-        showgrid=False,
-    ),
+    xaxis2=dict(title="Time"),
+    yaxis=dict(title="Price"),
+    yaxis2=dict(title="OI Change (Buildup)"),
     legend=dict(
         orientation="h",
         yanchor="bottom",
         y=1.02,
         xanchor="right",
-        x=1
+        x=1,
     ),
     margin=dict(l=40, r=40, t=40, b=40),
-    height=700,
+    height=800,
 )
 
 st.plotly_chart(fig, use_container_width=True)
 
 st.caption(
-    "Green bars = Long buildup (Price↑, OI↑). Red bars = Short buildup (Price↓, OI↑). "
-    "Dummy data only – next step: wire Upstox futures + OI."
+    "Green bars = Long buildup (Price↑, OI↑). "
+    "Red bars = Short buildup (Price↓, OI↑). Dummy data only."
 )
